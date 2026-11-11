@@ -10,7 +10,7 @@
 - [x] M3 citekey
 - [x] M4 bibwriter/sync/CLI (init, add, remove, list, sync; aliases are full duplicate entries; unusable notes keep last good entry; missing papers dir aborts sync)
 - [x] M5 fetch (Crossref + arXiv, disk cache, 1h failure backoff, fills only empty fields)
-- [ ] M6 daemon/IPC
+- [x] M6 daemon/IPC (obib run, status; sync prefers the daemon; unix socket at ~/.local/state/obsidian-bib-sync/obib.sock)
 - [ ] M7 TUI/rewrite
 - [ ] M8 Homebrew/doctor
 

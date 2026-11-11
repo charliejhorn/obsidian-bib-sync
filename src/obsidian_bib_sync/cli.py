@@ -2,7 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import __version__
+from . import __version__, ipc
 from .config import Config, config_path
 from .fetch import Fetcher
 from .sync import run_sync
@@ -53,7 +53,21 @@ def _cmd_list(args) -> int:
     return 0
 
 
+def _print_status(st: dict) -> None:
+    for w in st.get("warnings", []):
+        print(f"warning [{w['kind']}]: {w['message']}", file=sys.stderr)
+    for e in st.get("errors", []):
+        print(f"error: {e}", file=sys.stderr)
+    print(f"{st['entries']} entries; {len(st.get('written', []))} target(s) updated")
+
+
 def _cmd_sync(args) -> int:
+    try:  # prefer the running daemon so there is only ever one writer
+        reply = ipc.request({"cmd": "sync"})
+        _print_status(reply["status"])
+        return 0 if reply["status"]["ok"] else 1
+    except ipc.DaemonNotRunning:
+        pass
     report = run_sync(Config.load(), fetcher=None if args.no_fetch else Fetcher())
     for w in report.warnings:
         print(f"warning [{w.kind}]: {w.message}", file=sys.stderr)
@@ -64,6 +78,45 @@ def _cmd_sync(args) -> int:
         f"{len(report.unchanged)} unchanged"
     )
     return 0 if report.ok else 1
+
+
+def _cmd_run(args) -> int:
+    import logging
+
+    from .daemon import Daemon
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    cfg = Config.load()
+    if cfg.papers_dir is None:
+        print("error: papers_dir is not configured (run `obib init <dir>`)", file=sys.stderr)
+        return 2
+    try:
+        Daemon(cfg, fetcher=Fetcher()).run()
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_status(args) -> int:
+    try:
+        reply = ipc.request({"cmd": "status"}, timeout=10)
+    except ipc.DaemonNotRunning:
+        print(
+            "daemon is not running (start it with `brew services start obsidian-bib-sync`"
+            " or `obib run`)"
+        )
+        return 1
+    st = reply["status"]
+    print(f"papers:    {reply['papers_dir']}")
+    print(f"last sync: {st['last_sync']}  ({'ok' if st['ok'] else 'errors'})")
+    print(f"entries:   {st['entries']}")
+    print("targets:   " + ", ".join(reply["targets"]))
+    for w in st.get("warnings", []):
+        print(f"warning [{w['kind']}]: {w['message']}")
+    for e in st.get("errors", []):
+        print(f"error: {e}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -89,6 +142,12 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("sync", help="run one sync pass now")
     p.add_argument("--no-fetch", action="store_true", help="skip DOI/arXiv metadata lookup")
     p.set_defaults(func=_cmd_sync)
+
+    p = sub.add_parser("run", help="run the sync daemon in the foreground (used by brew services)")
+    p.set_defaults(func=_cmd_run)
+
+    p = sub.add_parser("status", help="show the running daemon's status")
+    p.set_defaults(func=_cmd_status)
 
     args = parser.parse_args(argv)
     return args.func(args)
