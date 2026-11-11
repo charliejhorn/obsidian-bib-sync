@@ -7,16 +7,52 @@ rewrites a managed block in every registered `.bib`. CLI command: `obib`.
 ## Quick start
 
 ```sh
-pipx install .                    # or: brew install <tap>/obsidian-bib-sync
+pipx install .                    # or install via Homebrew, see "Homebrew install" below
 obib init ~/Obsidian/Papers       # folder with one note per paper
 obib add ~/projects/thesis/refs.bib
 obib add ~/projects/talk/refs.bib
-brew services start obsidian-bib-sync   # or run `obib run` in a terminal
+brew services start obsidian-bib-sync   # Homebrew installs only; otherwise run `obib run` in a terminal
 obib tui                          # status, renames, targets
 obib doctor                       # check the setup
 ```
 
 `obib sync` runs one pass now (it asks the daemon if one is running).
+
+## Homebrew install (runs at login via `brew services`)
+
+`brew services` only manages Homebrew formulae, so the formula has to live in a tap: a GitHub repo
+named `homebrew-<name>` that you own. With `github.com/<you>/homebrew-tap`, the tap is `<you>/tap`.
+`packaging/homebrew/obsidian-bib-sync.rb` is the formula template.
+
+1. Publish the project and tag a release:
+   ```sh
+   git tag v0.1.0 && git push origin main --tags
+   curl -L https://github.com/<you>/obsidian-bib-sync/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256
+   ```
+2. Create the tap and add the formula:
+   ```sh
+   brew tap-new <you>/tap
+   cp packaging/homebrew/obsidian-bib-sync.rb "$(brew --repository <you>/tap)/Formula/"
+   ```
+   In the copied file, replace `OWNER` with your GitHub username and `REPLACE_WITH_TARBALL_SHA256`
+   with the hash from step 1.
+3. Generate the Python dependency blocks:
+   ```sh
+   brew update-python-resources <you>/tap/obsidian-bib-sync
+   ```
+4. Push the tap: in the directory printed by `brew --repository <you>/tap`, create
+   `github.com/<you>/homebrew-tap` and push to it.
+5. Install and start the service:
+   ```sh
+   brew install <you>/tap/obsidian-bib-sync
+   obib init ~/Obsidian/Papers && obib add ~/projects/thesis/refs.bib
+   brew services start obsidian-bib-sync
+   ```
+
+The service runs `obib run` at login and restarts it if it exits. Its log is at
+`$(brew --prefix)/var/log/obsidian-bib-sync.log`. Use `brew services restart obsidian-bib-sync`
+after upgrading. Without Homebrew, `pipx install .` and `obib run` in a terminal also work, but
+nothing starts it at login.
 
 ## Note syntax
 
