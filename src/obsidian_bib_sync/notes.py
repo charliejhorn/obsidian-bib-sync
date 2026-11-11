@@ -58,9 +58,9 @@ class Paper:
 
     @property
     def needs_fetch(self) -> bool:
-        """True when an identifier is present but the core fields are missing."""
+        """True when an identifier is present but core fields (or the type) are missing."""
         core_missing = not (self.fields.get("title") and self.authors and self.fields.get("year"))
-        return bool(self.doi or self.arxiv) and core_missing
+        return bool(self.doi or self.arxiv) and (core_missing or not self.entry_type)
 
 
 @dataclass
@@ -90,6 +90,7 @@ def _yaml() -> YAML:
     y = YAML()  # round-trip: preserves order and comments
     y.preserve_quotes = True
     y.width = 4096
+    y.indent(mapping=2, sequence=4, offset=2)  # Obsidian style: `tags:\n  - item`
     return y
 
 
@@ -155,9 +156,7 @@ def parse_note(path: Path, text: str | None = None) -> Paper | Skipped | Invalid
         return Skipped(path, "frontmatter is not a mapping")
 
     entry_type = _scalar(data.get("type")).lower()
-    if not entry_type:
-        return Skipped(path, "no `type` field")
-    if entry_type not in ENTRY_TYPES:
+    if entry_type and entry_type not in ENTRY_TYPES:
         return Skipped(path, f"`type: {entry_type}` is not a BibTeX entry type")
 
     fields = {k: _scalar(data.get(k)) for k in BIB_FIELDS if _scalar(data.get(k))}
@@ -169,6 +168,11 @@ def parse_note(path: Path, text: str | None = None) -> Paper | Skipped | Invalid
     if arxiv:
         fields["eprint"] = arxiv
         fields.setdefault("archiveprefix", "arXiv")
+
+    if not entry_type and not (doi or arxiv):
+        if not any((fields.get("title"), authors, fields.get("year"))):
+            return Skipped(path, "no `type` field")
+        return Invalid(path, "missing `type` (e.g. article, inproceedings, book, misc)")
 
     has_core = fields.get("title") and authors and fields.get("year")
     if not (has_core or doi or arxiv):

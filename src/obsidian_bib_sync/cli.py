@@ -147,6 +147,8 @@ def _cmd_doctor(args) -> int:
             )
             for inv in r.invalid:
                 print(f"      invalid: {inv.path}: {inv.reason}")
+            for sk in r.skipped:
+                print(f"      ignored: {sk.path}: {sk.reason}")
     check(bool(cfg.targets), f"{len(cfg.targets)} target(s) registered", "no targets (`obib add`)")
     for t in cfg.targets:
         check(t.parent.is_dir(), f"target {t}", f"target directory missing: {t.parent}")

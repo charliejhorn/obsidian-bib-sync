@@ -54,6 +54,13 @@ def run_sync(
     result = scan(config.papers_dir)
     if fetcher is not None:
         _autofill(result, fetcher, report)
+    # Still no type (e.g. lookup failed or offline): not usable yet; keep any previous entry.
+    untyped = [p for p in result.papers if not p.entry_type]
+    result.papers = [p for p in result.papers if p.entry_type]
+    for p in untyped:
+        report.warnings.append(
+            Warning_("pending", f"{p.path}: waiting for metadata to determine `type`", [p.path])
+        )
     for inv in result.invalid:
         report.warnings.append(Warning_("invalid", f"{inv.path}: {inv.reason}", [inv.path]))
     res = resolve(result.papers, registry)
@@ -79,7 +86,7 @@ def run_sync(
 
     # Notes that exist but are unusable right now keep their previous entry.
     retained = live_paths | {p.path for p in result.invalid} | {s.path for s in result.skipped}
-    retained |= set(res.conflicts) | set(res.pending)
+    retained |= set(res.conflicts) | set(res.pending) | {p.path for p in untyped}
     emitted_paths = {str(p) for p in res.keys}
     for key, rec in registry.keys.items():
         if key in entries or rec.get("retired") or not rec.get("entry"):

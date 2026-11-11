@@ -51,7 +51,8 @@ named `homebrew-<name>` that you own. With `github.com/<you>/homebrew-tap`, the 
 
 The service runs `obib run` at login and restarts it if it exits. Its log is at
 `$(brew --prefix)/var/log/obsidian-bib-sync.log`. Use `brew services restart obsidian-bib-sync`
-after upgrading. Without Homebrew, `pipx install .` and `obib run` in a terminal also work, but
+after upgrading. To follow the `main` branch instead of a release (add the `head` line from the
+template to the tap's formula): `brew reinstall --HEAD <you>/tap/obsidian-bib-sync`. Without Homebrew, `pipx install .` and `obib run` in a terminal also work, but
 nothing starts it at login.
 
 ## Note syntax

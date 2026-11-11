@@ -29,9 +29,22 @@ def _strip_tags(s: str) -> str:
     return re.sub(r"<[^>]+>", "", s).strip()
 
 
-def parse_crossref(data: dict, entry_type: str) -> dict:
+_CROSSREF_TYPES = {
+    "journal-article": "article",
+    "proceedings-article": "inproceedings",
+    "book": "book",
+    "monograph": "book",
+    "edited-book": "book",
+    "book-chapter": "incollection",
+    "report": "techreport",
+    "dissertation": "phdthesis",
+}
+
+
+def parse_crossref(data: dict, entry_type: str = "") -> dict:
     msg = data["message"]
-    out: dict = {}
+    out: dict = {"type": _CROSSREF_TYPES.get(msg.get("type", ""), "misc")}
+    entry_type = entry_type or out["type"]
     if msg.get("title"):
         out["title"] = _strip_tags(msg["title"][0])
     authors = []
@@ -71,7 +84,10 @@ def parse_arxiv(xml_text: str) -> dict:
     entry = root.find(f"{_ATOM}entry")
     if entry is None or entry.findtext(f"{_ATOM}title", "").strip().lower() == "error":
         raise ValueError("arXiv returned no entry")
-    out: dict = {"title": " ".join(entry.findtext(f"{_ATOM}title", "").split())}
+    out: dict = {
+        "type": "misc",
+        "title": " ".join(entry.findtext(f"{_ATOM}title", "").split()),
+    }
     names = [a.findtext(f"{_ATOM}name", "") for a in entry.findall(f"{_ATOM}author")]
     out["authors"] = [normalize_author(n) for n in names if n]
     published = entry.findtext(f"{_ATOM}published", "")
@@ -161,7 +177,10 @@ def missing_updates(paper: Paper, data: dict) -> dict:
     """Frontmatter keys to write: only fields the note leaves empty (never overwrite the user)."""
     updates: dict = {}
     for k, v in data.items():
-        if k == "authors":
+        if k == "type":
+            if not paper.entry_type:
+                updates["type"] = v
+        elif k == "authors":
             if not paper.authors:
                 updates["authors"] = list(v)
         elif not paper.fields.get(k):

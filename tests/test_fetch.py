@@ -53,6 +53,7 @@ def test_parse_crossref():
 def test_parse_arxiv():
     d = parse_arxiv(ARXIV)
     assert d == {
+        "type": "misc",
         "title": "Attention Is All You Need",
         "authors": ["Vaswani, Ashish", "Shazeer, Noam"],
         "year": 2017,
@@ -124,3 +125,36 @@ def test_sync_survives_fetch_failure(tmp_path):
     assert r.ok and r.entries == 0 and any(w.kind == "fetch" for w in r.warnings)
     assert json.loads(Path(tmp_path / "cache.json").read_text())
     assert not Registry.load(tmp_path / "k.json").keys
+
+
+def test_blank_type_is_filled_from_crossref(tmp_path):
+    vault = tmp_path / "v"
+    vault.mkdir()
+    (vault / "n.md").write_text(
+        "---\ntype:\ntitle:\nauthors:\nyear:\njournal:\n"
+        "doi: 10.1038/nature14539\ncitekey:\ntags:\n  - paper\n---\n"
+    )
+    cfg = Config(papers_dir=vault, targets=[tmp_path / "r.bib"], registry_path=tmp_path / "k.json")
+    cross = {"message": {**CROSSREF["message"], "type": "journal-article"}}
+    r = run_sync(cfg, fetcher=make_fetcher(tmp_path, lambda q: httpx.Response(200, json=cross)))
+    assert r.ok and r.entries == 1
+    note = (vault / "n.md").read_text()
+    assert "type: article" in note and "tags:\n  - paper" in note
+    assert "@article{lecun2015deep," in (tmp_path / "r.bib").read_text()
+
+
+def test_blank_type_without_fetch_is_pending_not_emitted(tmp_path):
+    vault = tmp_path / "v"
+    vault.mkdir()
+    (vault / "n.md").write_text("---\ntype:\ndoi: 10.1/x\n---\n")
+    cfg = Config(papers_dir=vault, targets=[tmp_path / "r.bib"], registry_path=tmp_path / "k.json")
+    r = run_sync(cfg)
+    assert r.entries == 0 and [w.kind for w in r.warnings] == ["pending"]
+
+
+def test_blank_type_without_identifiers_is_reported(tmp_path):
+    f = tmp_path / "n.md"
+    f.write_text("---\ntype:\ntitle: Something\n---\n")
+    assert type(parse_note(f)).__name__ == "Invalid"
+    f.write_text("---\ntype:\ntags: [daily]\n---\n")
+    assert type(parse_note(f)).__name__ == "Skipped"

@@ -11,6 +11,7 @@ class ObsidianBibSync < Formula
   url "https://github.com/OWNER/obsidian-bib-sync/archive/refs/tags/v0.1.0.tar.gz"
   sha256 "REPLACE_WITH_TARBALL_SHA256"
   license "MIT"
+  head "https://github.com/OWNER/obsidian-bib-sync.git", branch: "main"
 
   depends_on "python@3.13"
 
