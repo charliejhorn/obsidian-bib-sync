@@ -119,6 +119,47 @@ def _cmd_status(args) -> int:
     return 0
 
 
+def _cmd_doctor(args) -> int:
+    from .citekey import DEFAULT_REGISTRY_PATH
+    from .notes import scan
+
+    problems = 0
+
+    def check(ok: bool, good: str, bad: str) -> None:
+        nonlocal problems
+        print(("ok    " if ok else "FAIL  ") + (good if ok else bad))
+        problems += not ok
+
+    cfg_file = config_path()
+    check(
+        cfg_file.exists(), f"config: {cfg_file}", f"no config at {cfg_file} (run `obib init <dir>`)"
+    )
+    cfg = Config.load()
+    check(cfg.papers_dir is not None, f"papers dir: {cfg.papers_dir}", "papers_dir is not set")
+    if cfg.papers_dir is not None:
+        exists = cfg.papers_dir.is_dir()
+        check(exists, "papers dir exists", f"papers dir {cfg.papers_dir} does not exist")
+        if exists:
+            r = scan(cfg.papers_dir)
+            print(
+                f"      {len(r.papers)} paper note(s), {len(r.invalid)} invalid, "
+                f"{len(r.skipped)} other note(s) ignored"
+            )
+            for inv in r.invalid:
+                print(f"      invalid: {inv.path}: {inv.reason}")
+    check(bool(cfg.targets), f"{len(cfg.targets)} target(s) registered", "no targets (`obib add`)")
+    for t in cfg.targets:
+        check(t.parent.is_dir(), f"target {t}", f"target directory missing: {t.parent}")
+    reg = cfg.registry_path or DEFAULT_REGISTRY_PATH
+    print(f"      key registry: {reg} ({'exists' if reg.exists() else 'not created yet'})")
+    try:
+        ipc.request({"cmd": "ping"}, timeout=5)
+        check(True, "daemon is running", "")
+    except ipc.DaemonNotRunning:
+        check(False, "", "daemon is not running (`brew services start obsidian-bib-sync`)")
+    return 1 if problems else 0
+
+
 def _cmd_tui(args) -> int:
     from .tui.app import main as tui_main
 
@@ -155,6 +196,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("status", help="show the running daemon's status")
     p.set_defaults(func=_cmd_status)
+
+    p = sub.add_parser("doctor", help="check configuration and environment")
+    p.set_defaults(func=_cmd_doctor)
 
     p = sub.add_parser("tui", help="open the terminal UI")
     p.set_defaults(func=_cmd_tui)

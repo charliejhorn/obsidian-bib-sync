@@ -21,8 +21,14 @@ class DaemonNotRunning(Exception):
     pass
 
 
+def _check_length(path: Path) -> None:
+    if len(str(path).encode()) > 100:  # sun_path limit is ~104 bytes on macOS
+        raise ValueError(f"socket path is too long for a unix socket: {path} (set OBIB_SOCKET)")
+
+
 def request(cmd: dict, path: Path | None = None, timeout: float = 120) -> dict:
     path = path or socket_path()
+    _check_length(path)
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(timeout)
@@ -53,6 +59,7 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
     def __init__(self, path: Path, dispatch: Callable[[dict], dict]):
+        _check_length(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             try:

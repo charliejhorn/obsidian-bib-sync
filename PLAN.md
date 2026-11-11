@@ -12,7 +12,7 @@
 - [x] M5 fetch (Crossref + arXiv, disk cache, 1h failure backoff, fills only empty fields)
 - [x] M6 daemon/IPC (obib run, status; sync prefers the daemon; unix socket at ~/.local/state/obsidian-bib-sync/obib.sock)
 - [x] M7 TUI/rewrite (tabs: Status, Papers, Targets, Renames & orphans; keys s sync, d remove target, r review rename, x drop orphan, k keep orphan)
-- [ ] M8 Homebrew/doctor
+- [x] M8 Homebrew formula template, README, `obib doctor` (formula needs release tarball sha + `brew update-python-resources`)
 
 ## Context
 Papers are researched in Obsidian, one note per paper. The same bibliography must be available in many LaTeX
