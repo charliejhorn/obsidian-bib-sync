@@ -119,6 +119,13 @@ def _cmd_status(args) -> int:
     return 0
 
 
+def _cmd_tui(args) -> int:
+    from .tui.app import main as tui_main
+
+    tui_main()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="obib", description="Sync Obsidian papers to .bib files")
     parser.add_argument("--version", action="version", version=f"obib {__version__}")
@@ -148,6 +155,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("status", help="show the running daemon's status")
     p.set_defaults(func=_cmd_status)
+
+    p = sub.add_parser("tui", help="open the terminal UI")
+    p.set_defaults(func=_cmd_tui)
 
     args = parser.parse_args(argv)
     return args.func(args)
