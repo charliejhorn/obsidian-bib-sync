@@ -98,6 +98,23 @@ def _cmd_run(args) -> int:
     return 0
 
 
+_PRIVACY_HINT = (
+    "a sync has been running for a long time: on macOS a background process is often blocked "
+    "from reading ~/Documents, ~/Desktop or iCloud folders until it is granted access "
+    "(System Settings > Privacy & Security > Full Disk Access; see README)"
+)
+
+
+def _syncing_note(reply: dict) -> str | None:
+    since = reply.get("syncing_since")
+    if not since:
+        return None
+    from datetime import UTC, datetime
+
+    secs = (datetime.now(UTC) - datetime.fromisoformat(since)).total_seconds()
+    return f"sync in progress for {int(secs)}s" + (f" - {_PRIVACY_HINT}" if secs > 20 else "")
+
+
 def _cmd_status(args) -> int:
     try:
         reply = ipc.request({"cmd": "status"}, timeout=10)
@@ -109,6 +126,8 @@ def _cmd_status(args) -> int:
         return 1
     st = reply["status"]
     print(f"papers:    {reply['papers_dir']}")
+    if note := _syncing_note(reply):
+        print(f"WARNING:   {note}")
     print(f"last sync: {st['last_sync']}  ({'ok' if st['ok'] else 'errors'})")
     print(f"entries:   {st['entries']}")
     print("targets:   " + ", ".join(reply["targets"]))
@@ -157,6 +176,8 @@ def _cmd_doctor(args) -> int:
     try:
         ipc.request({"cmd": "ping"}, timeout=5)
         check(True, "daemon is running", "")
+        if note := _syncing_note(ipc.request({"cmd": "status"}, timeout=5)):
+            check(False, "", note)
     except ipc.DaemonNotRunning:
         check(False, "", "daemon is not running (`brew services start obsidian-bib-sync`)")
     return 1 if problems else 0
@@ -236,4 +257,12 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=_cmd_tui)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ipc.DaemonUnresponsive:
+        print(
+            "error: the daemon is running but not responding; check `obib service logs`"
+            " (on macOS it can be blocked from reading the papers folder, see README)",
+            file=sys.stderr,
+        )
+        return 1

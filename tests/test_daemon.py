@@ -75,3 +75,23 @@ def test_config_reload_picks_up_new_target(running, tmp_path):
     cfg.registry_path = tmp_path / "k.json"
     cfg.save(d.cfg_file)
     assert wait_for(lambda: new.exists() and "smith2020hello" in new.read_text())
+
+
+def test_signature_changes_on_edit_rename_delete_but_ignores_hidden(tmp_path):
+    from obsidian_bib_sync.daemon import signature
+
+    (tmp_path / "a.md").write_text("x")
+    base = signature(tmp_path)
+    assert signature(tmp_path) == base
+    (tmp_path / ".obsidian").mkdir()
+    (tmp_path / ".obsidian" / "n.md").write_text("ignored")
+    (tmp_path / "notes.txt").write_text("ignored")
+    assert signature(tmp_path) == base
+    (tmp_path / "a.md").write_text("changed")
+    edited = signature(tmp_path)
+    assert edited != base
+    (tmp_path / "a.md").rename(tmp_path / "b.md")
+    renamed = signature(tmp_path)
+    assert renamed != edited
+    (tmp_path / "b.md").unlink()
+    assert signature(tmp_path) not in (base, edited, renamed)

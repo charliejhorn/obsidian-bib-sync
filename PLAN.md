@@ -12,7 +12,7 @@
 - [x] M5 fetch (Crossref + arXiv, disk cache, 1h failure backoff, fills only empty fields)
 - [x] M6 daemon/IPC (obib run, status; sync prefers the daemon; unix socket at ~/.local/state/obsidian-bib-sync/obib.sock)
 - [x] M7 TUI/rewrite (tabs: Status, Papers, Targets, Renames & orphans; keys s sync, d remove target, r review rename, x drop orphan, k keep orphan)
-- [x] M8 Homebrew formula template, README, `obib doctor` (formula needs release tarball sha + `brew update-python-resources`)
+- [x] M8 README, `obib doctor`; Homebrew tap dropped in favour of `uv tool install --editable .` + `obib service` (launchd agent)
 
 ## Context
 Papers are researched in Obsidian, one note per paper. The same bibliography must be available in many LaTeX
@@ -23,17 +23,17 @@ the `.tex` files. Keys are therefore stable and tracked.
 ## Decisions (approved)
 | Area | Decision |
 |---|---|
-| Language | Python (3.11+), packaged with `pyproject.toml`, installable via pipx and a Homebrew tap |
+| Language | Python (3.11+), packaged with `pyproject.toml`, installed with `uv tool install --editable .` |
 | Metadata | YAML frontmatter in each note, BibTeX-like fields |
 | Auto-fetch | If `doi` or `arxiv` is set and core fields are empty, fetch and fill frontmatter |
 | Cite key | `authorYearWord` (e.g. `vaswani2017attention`), generated once, stored in the note as `citekey`, never auto-changed |
-| Runtime | Headless daemon run by `brew services`; separate TUI client |
+| Runtime | Headless daemon run as a launchd user agent via `obib service install` (switched from `brew services`: no release/tap upkeep); separate TUI client |
 | Bib ownership | Tool owns only a managed block inside each bib; the rest of the file is preserved |
 | Deleted notes | Entry removed after a grace period; shown as a TUI warning because removal breaks `\cite` |
 | Targets | Explicit list, managed in the TUI and via `obib add <path.bib>` |
 | Key safety | Lock file registry of all issued keys, plus a TUI "rename" action that rewrites `\cite` in registered projects |
 
-CLI command: `obib` (approved). Project, package (`obsidian_bib_sync`), Homebrew formula and config dir keep the `obsidian-bib-sync` name.
+CLI command: `obib` (approved). Project, package (`obsidian_bib_sync`) and config dir keep the `obsidian-bib-sync` name.
 
 ## Note syntax
 Frontmatter (Obsidian Properties compatible, lowercase keys, lists as YAML lists):
@@ -92,22 +92,22 @@ obsidian-bib-sync/
     citekey.py      # generation + lock file registry + rename detection
     bibwriter.py    # render entries; managed-block read/write (bibtexparser for parsing the rest), atomic write
     sync.py         # one sync pass: scan -> fetch -> keys -> render -> write all targets; hash-based change detection
-    daemon.py       # loop: watchdog events + periodic full scan fallback; serves state over unix socket
+    daemon.py       # loop: pure-Python change poll + periodic full scan (watchdog's FSEvents binding froze the daemon under macOS privacy blocks, so it was dropped) + periodic full scan fallback; serves state over unix socket
     ipc.py          # JSON-over-unix-socket protocol (status, sync-now, list-warnings, accept-rename...)
     tui/            # Textual app: Status, Papers, Targets, Warnings/Renames, Log screens
     rewrite.py      # \cite-family rewriter for rename action (cite, citep, citet, autocite, parencite, textcite, ...)
     cli.py          # entry point: run, tui, sync, add, remove, list, doctor
   tests/
-  packaging/homebrew/   # formula template for a tap; service block -> `brew services start obsidian-bib-sync`
+    service.py      # launchd user agent: `obib service install|uninstall|restart|status|logs`
 ```
-- **Change detection:** poll interval (default 30s) plus watchdog FS events; compare per-note content hash; a full
+- **Change detection:** poll interval (default 30s) plus a 2s cheap change poll of the notes; compare per-note content hash; a full
   scan runs on start. Only write targets when rendered output hash changed (avoids churning LaTeX builds / cloud sync).
 - **Bib output:** managed block between
   `% >>> obsidian-bib-sync (do not edit between markers) >>>` and `% <<< obsidian-bib-sync <<<`.
   Entries sorted by key for deterministic output. All targets get byte-identical blocks. Writes are atomic
   (temp file + rename). A target that does not exist is created. Hand-edited content inside the block is
   overwritten, but a backup is kept (`.bak`, last one only).
-- **Brew service:** daemon is `obib run`; formula `service do run [opt_bin/"obib", "run"]; keep_alive true; log_path ...`.
+- **Service:** daemon is `obib run`, run by a launchd agent (`RunAtLoad`, `KeepAlive`) installed by `obib service install`. On macOS the Python binary needs Full Disk Access to read notes under ~/Documents.
   TUI (`obib tui`) is a client; it works (read-only, config edits only) even if the daemon is down and says so.
 - **Add command:** `obib add path/to/refs.bib` registers the target (also `remove`, `list`). It writes
   config atomically; the daemon reloads config on change/SIGHUP. It also records the project dir (the bib's directory)
@@ -123,9 +123,9 @@ obsidian-bib-sync/
 3. `citekey.py` + lock file + collision and rename-detection tests.
 4. `bibwriter.py` managed block + atomic multi-target `sync.py` + `sync`/`add` CLI. **Usable CLI milestone.**
 5. `fetch.py` DOI/arXiv auto-fill with cached HTTP fixtures (no live network in tests).
-6. `daemon.py` + IPC + watchdog/poll; launchd run via brew service.
+6. `daemon.py` + IPC + change poll; launchd agent (`obib service`).
 7. Textual TUI (status, targets, warnings, rename flow) and `rewrite.py`.
-8. Homebrew tap formula, README, `doctor` command.
+8. README, `doctor` command.
 Review PLAN.md at the start and end of each milestone; update Decisions/Status if anything changes.
 
 ## Verification
@@ -133,7 +133,7 @@ Review PLAN.md at the start and end of each milestone; update Decisions/Status i
   byte-identical outputs across targets, cite rewrite on sample `.tex`, fetch parsers against recorded responses.
 - End-to-end with a temp vault and two temp "LaTeX project" dirs: `add` both, add/edit/delete/rename notes, confirm
   both bibs identical and `\cite` keys unchanged; compile a sample `.tex` with `latexmk`/`bibtex` if available.
-- Run daemon via `obib run`, edit a note, confirm bibs update within one interval; then `brew services` locally via the formula.
+- Run daemon via `obib run`, edit a note, confirm bibs update within one interval; then via `obib service install`.
 - Drive the TUI with Textual's `Pilot` tests and manually.
 
 ## Remaining open questions (low-stakes, will default if no answer)

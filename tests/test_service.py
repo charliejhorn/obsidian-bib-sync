@@ -15,7 +15,7 @@ class FakeLaunchctl:
 
     def __call__(self, cmd, **kwargs):
         self.calls.append(cmd)
-        rc = 1 if self.fail_on and self.fail_on in cmd else 0
+        rc = 1 if (self.fail_on and self.fail_on in cmd) or "print" in cmd else 0  # never "loaded"
         return subprocess.CompletedProcess(cmd, rc, stdout="", stderr="boom" if rc else "")
 
 

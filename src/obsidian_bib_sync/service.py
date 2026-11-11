@@ -7,6 +7,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -61,12 +62,19 @@ class Service:
         with open(self.plist_path, "wb") as f:
             plistlib.dump(build_plist(exe, self.log_path), f)
         self._launchctl("bootout", f"{self.domain}/{LABEL}")  # reload cleanly if already loaded
+        self._wait_unloaded()
         res = self._launchctl("bootstrap", self.domain, str(self.plist_path))
         if res.returncode != 0:
             raise RuntimeError(
                 f"launchctl bootstrap failed: {res.stderr.strip() or res.stdout.strip()}"
             )
         return exe
+
+    def _wait_unloaded(self, timeout: float = 30.0) -> None:
+        """bootout returns before a busy process has exited; bootstrap fails until it has."""
+        deadline = time.monotonic() + timeout
+        while self.is_loaded() and time.monotonic() < deadline:
+            time.sleep(0.5)
 
     def uninstall(self) -> bool:
         self._launchctl("bootout", f"{self.domain}/{LABEL}")

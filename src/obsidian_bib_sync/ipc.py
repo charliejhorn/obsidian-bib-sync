@@ -21,6 +21,10 @@ class DaemonNotRunning(Exception):
     pass
 
 
+class DaemonUnresponsive(Exception):
+    """A daemon owns the socket but did not answer in time (it may be hung)."""
+
+
 def _check_length(path: Path) -> None:
     if len(str(path).encode()) > 100:  # sun_path limit is ~104 bytes on macOS
         raise ValueError(f"socket path is too long for a unix socket: {path} (set OBIB_SOCKET)")
@@ -42,6 +46,10 @@ def request(cmd: dict, path: Path | None = None, timeout: float = 120) -> dict:
                 data += chunk
     except (FileNotFoundError, ConnectionRefusedError) as e:
         raise DaemonNotRunning(str(path)) from e
+    except TimeoutError as e:
+        raise DaemonUnresponsive(str(path)) from e
+    if not data:
+        raise DaemonUnresponsive(str(path))  # connection closed without a reply
     return json.loads(data)
 
 
@@ -64,6 +72,8 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         if path.exists():
             try:
                 request({"cmd": "ping"}, path, timeout=2)
+            except DaemonUnresponsive as e:
+                raise RuntimeError(f"a daemon owns {path} but is not responding") from e
             except (DaemonNotRunning, OSError, ValueError):
                 path.unlink(missing_ok=True)  # stale socket from a crashed daemon
             else:

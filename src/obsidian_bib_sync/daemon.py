@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
-
-from watchdog.events import FileSystemEventHandler
-from watchdog.observers import Observer
 
 from . import ipc, rewrite
 from .citekey import DEFAULT_REGISTRY_PATH, Registry, accept_rename
@@ -18,17 +16,27 @@ from .fetch import Fetcher
 from .sync import SyncReport, run_sync
 
 log = logging.getLogger("obib")
-DEBOUNCE = 1.0  # seconds to let a burst of file events settle
+DEBOUNCE = 1.0  # seconds to let a burst of file changes settle
+POLL = 2.0  # seconds between cheap change checks of the papers directory
 
 
-class _Wake(FileSystemEventHandler):
-    def __init__(self, wake: threading.Event):
-        self._wake = wake
+def signature(root: Path) -> int:
+    """Cheap fingerprint of the notes (names, mtimes, sizes); changes when any note changes.
 
-    def on_any_event(self, event) -> None:
-        paths = [str(getattr(event, "src_path", "")), str(getattr(event, "dest_path", ""))]
-        if any(p.endswith(".md") or event.is_directory for p in paths):
-            self._wake.set()
+    Deliberately pure Python: native FSEvents bindings hold the GIL while opening the watched
+    folder, which freezes the whole daemon when macOS privacy (TCC) blocks the folder.
+    """
+    entries = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        for fn in filenames:
+            if fn.endswith(".md") and not fn.startswith("."):
+                try:
+                    st = os.stat(os.path.join(dirpath, fn))
+                except OSError:
+                    continue
+                entries.append((dirpath, fn, st.st_mtime_ns, st.st_size))
+    return hash(frozenset(entries))
 
 
 class Daemon:
@@ -48,10 +56,9 @@ class Daemon:
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._reload = False
-        self._observer: Observer | None = None
-        self._watching: Path | None = None
         self.registry = self._load_registry()
         self.status: dict = {"last_sync": None, "ok": None, "entries": 0}
+        self._syncing_since: str | None = None
 
     # -- state -------------------------------------------------------------
     def _load_registry(self) -> Registry:
@@ -85,7 +92,11 @@ class Daemon:
 
     def sync_now(self) -> dict:
         with self._lock:
-            report = run_sync(self.config, self.registry, fetcher=self.fetcher)
+            self._syncing_since = datetime.now(UTC).isoformat(timespec="seconds")
+            try:
+                report = run_sync(self.config, self.registry, fetcher=self.fetcher)
+            finally:
+                self._syncing_since = None
             self._record(report)
         for w in report.warnings:
             log.warning("[%s] %s", w.kind, w.message)
@@ -100,24 +111,22 @@ class Daemon:
             self.config = Config.load(self.cfg_file)
             self._cfg_mtime = self._mtime()
             self.registry = self._load_registry()
-            self._watch()
         log.info("configuration reloaded")
 
-    # -- file watching -----------------------------------------------------
-    def _watch(self) -> None:
-        if self._watching == self.config.papers_dir:
-            return
-        if self._observer:
-            self._observer.stop()
-            self._observer.join(timeout=5)
-            self._observer = None
-        self._watching = None
-        root = self.config.papers_dir
-        if root and root.is_dir():
-            obs = Observer()
-            obs.schedule(_Wake(self._wake), str(root), recursive=True)
-            obs.start()
-            self._observer, self._watching = obs, root
+    # -- change detection -----------------------------------------------------
+    def _poll_changes(self) -> None:
+        last = None
+        while not self._stop.is_set():
+            root = self.config.papers_dir
+            if root is not None and root.is_dir():
+                try:
+                    sig = signature(root)
+                except OSError:
+                    sig = last
+                if last is not None and sig != last:
+                    self._wake.set()
+                last = sig
+            self._stop.wait(POLL)
 
     # -- ipc ---------------------------------------------------------------
     def dispatch(self, cmd: dict) -> dict:
@@ -125,14 +134,15 @@ class Daemon:
         if name == "ping":
             return {"ok": True}
         if name == "status":
-            with self._lock:
-                return {
-                    "ok": True,
-                    "status": self.status,
-                    "papers_dir": str(self.config.papers_dir) if self.config.papers_dir else None,
-                    "targets": [str(t) for t in self.config.targets],
-                    "interval": self.config.interval,
-                }
+            # No lock: this must answer even while a sync is stuck (e.g. blocked by macOS privacy).
+            return {
+                "ok": True,
+                "status": self.status,
+                "syncing_since": self._syncing_since,
+                "papers_dir": str(self.config.papers_dir) if self.config.papers_dir else None,
+                "targets": [str(t) for t in self.config.targets],
+                "interval": self.config.interval,
+            }
         if name == "sync":
             return {"ok": True, "status": self.sync_now()}
         if name == "reload":
@@ -190,10 +200,13 @@ class Daemon:
             signal.signal(signal.SIGTERM, self.stop)
             signal.signal(signal.SIGINT, self.stop)
             signal.signal(signal.SIGHUP, lambda *_: self._wake.set() or self._force_reload())
+        threading.Thread(target=self._poll_changes, daemon=True, name="obib-poll").start()
         try:
-            self._watch()
+            log.info(
+                "starting; papers dir %s (every %ss)", self.config.papers_dir, self.config.interval
+            )
             self.sync_now()
-            log.info("watching %s (every %ss)", self.config.papers_dir, self.config.interval)
+            log.info("first sync finished")
             while not self._stop.is_set():
                 triggered = self._wake.wait(timeout=self.config.interval)
                 if self._stop.is_set():
@@ -204,13 +217,8 @@ class Daemon:
                 if self._mtime() != self._cfg_mtime or self._reload:
                     self._reload = False
                     self.reload_config()
-                else:
-                    self._watch()  # e.g. the papers dir appeared since last time
                 self.sync_now()
         finally:
-            if self._observer:
-                self._observer.stop()
-                self._observer.join(timeout=5)
             server.close()
 
     def _force_reload(self) -> None:

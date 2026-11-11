@@ -7,53 +7,43 @@ rewrites a managed block in every registered `.bib`. CLI command: `obib`.
 ## Quick start
 
 ```sh
-pipx install .                    # or install via Homebrew, see "Homebrew install" below
+uv tool install --editable .      # `obib` on your PATH; source edits take effect immediately
 obib init ~/Obsidian/Papers       # folder with one note per paper
 obib add ~/projects/thesis/refs.bib
 obib add ~/projects/talk/refs.bib
-brew services start obsidian-bib-sync   # Homebrew installs only; otherwise run `obib run` in a terminal
+obib service install              # background service, starts at login (or `obib run` in a terminal)
 obib tui                          # status, renames, targets
 obib doctor                       # check the setup
 ```
 
 `obib sync` runs one pass now (it asks the daemon if one is running).
 
-## Homebrew install (runs at login via `brew services`)
+## Running in the background (macOS)
 
-`brew services` only manages Homebrew formulae, so the formula has to live in a tap: a GitHub repo
-named `homebrew-<name>` that you own. With `github.com/<you>/homebrew-tap`, the tap is `<you>/tap`.
-`packaging/homebrew/obsidian-bib-sync.rb` is the formula template.
+`obib service install` writes a launchd user agent (`~/Library/LaunchAgents/com.obsidian-bib-sync.daemon.plist`)
+that runs `obib run` at login and restarts it if it exits. Related commands:
 
-1. Publish the project and tag a release:
-   ```sh
-   git tag v0.1.0 && git push origin main --tags
-   curl -L https://github.com/<you>/obsidian-bib-sync/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256
-   ```
-2. Create the tap and add the formula:
-   ```sh
-   brew tap-new <you>/tap
-   cp packaging/homebrew/obsidian-bib-sync.rb "$(brew --repository <you>/tap)/Formula/"
-   ```
-   In the copied file, replace `OWNER` with your GitHub username and `REPLACE_WITH_TARBALL_SHA256`
-   with the hash from step 1.
-3. Generate the Python dependency blocks:
-   ```sh
-   brew update-python-resources <you>/tap/obsidian-bib-sync
-   ```
-4. Push the tap: in the directory printed by `brew --repository <you>/tap`, create
-   `github.com/<you>/homebrew-tap` and push to it.
-5. Install and start the service:
-   ```sh
-   brew install <you>/tap/obsidian-bib-sync
-   obib init ~/Obsidian/Papers && obib add ~/projects/thesis/refs.bib
-   brew services start obsidian-bib-sync
-   ```
+```sh
+obib service status      # loaded / not loaded
+obib service restart     # e.g. after editing the source of an editable install
+obib service logs        # follow ~/Library/Logs/obsidian-bib-sync.log
+obib service uninstall   # stop and remove the agent
+obib status              # what the daemon last did, plus any warnings
+```
 
-The service runs `obib run` at login and restarts it if it exits. Its log is at
-`$(brew --prefix)/var/log/obsidian-bib-sync.log`. Use `brew services restart obsidian-bib-sync`
-after upgrading. To follow the `main` branch instead of a release (add the `head` line from the
-template to the tap's formula): `brew reinstall --HEAD <you>/tap/obsidian-bib-sync`. Without Homebrew, `pipx install .` and `obib run` in a terminal also work, but
-nothing starts it at login.
+**Grant the service access to your notes folder.** macOS blocks background processes from reading
+`~/Documents`, `~/Desktop`, iCloud Drive and similar folders until you allow it. Until then the
+daemon sits in its first scan and `obib doctor` / `obib status` report "sync in progress for Ns".
+Fix it once:
+
+1. Find the Python the service uses: `readlink -f "$(head -1 "$(which obib)" | sed 's/^#!//')"`
+   (or look at the process path with `ps aux | grep "obib run"`).
+2. System Settings > Privacy & Security > Full Disk Access > `+`, press Cmd+Shift+G, and add the
+   `Python.app` that Python lives in (for Homebrew Python:
+   `/opt/homebrew/opt/python@3.15/Frameworks/Python.framework/Versions/3.15/Resources/Python.app`).
+3. `obib service restart`.
+
+Keeping your notes outside those protected folders avoids the problem entirely.
 
 ## Note syntax
 
@@ -114,4 +104,4 @@ targets = ["/Users/me/projects/thesis/refs.bib"]
 uv sync && uv run pytest && uv run ruff check .
 ```
 
-See `PLAN.md` for the design decisions and status; `packaging/homebrew/` has the formula template.
+See `PLAN.md` for the design decisions and status.
