@@ -9,7 +9,7 @@
 - [x] M2 notes (frontmatter parse, scan, round-trip write; "First Last" splits on last word, so use "Last, First" for particles like "van der Berg")
 - [x] M3 citekey
 - [x] M4 bibwriter/sync/CLI (init, add, remove, list, sync; aliases are full duplicate entries; unusable notes keep last good entry; missing papers dir aborts sync)
-- [ ] M5 fetch
+- [x] M5 fetch (Crossref + arXiv, disk cache, 1h failure backoff, fills only empty fields)
 - [ ] M6 daemon/IPC
 - [ ] M7 TUI/rewrite
 - [ ] M8 Homebrew/doctor

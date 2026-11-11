@@ -4,6 +4,7 @@ from pathlib import Path
 
 from . import __version__
 from .config import Config, config_path
+from .fetch import Fetcher
 from .sync import run_sync
 
 
@@ -53,7 +54,7 @@ def _cmd_list(args) -> int:
 
 
 def _cmd_sync(args) -> int:
-    report = run_sync(Config.load())
+    report = run_sync(Config.load(), fetcher=None if args.no_fetch else Fetcher())
     for w in report.warnings:
         print(f"warning [{w.kind}]: {w.message}", file=sys.stderr)
     for e in report.errors:
@@ -86,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=_cmd_list)
 
     p = sub.add_parser("sync", help="run one sync pass now")
+    p.add_argument("--no-fetch", action="store_true", help="skip DOI/arXiv metadata lookup")
     p.set_defaults(func=_cmd_sync)
 
     args = parser.parse_args(argv)

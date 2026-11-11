@@ -9,7 +9,8 @@ from pathlib import Path
 from . import bibwriter
 from .citekey import DEFAULT_REGISTRY_PATH, Registry, Warning_, resolve
 from .config import Config
-from .notes import Paper, scan, update_frontmatter
+from .fetch import Fetcher, missing_updates
+from .notes import Paper, parse_note, scan, update_frontmatter
 
 
 @dataclass
@@ -32,7 +33,10 @@ def _now() -> datetime:
 
 
 def run_sync(
-    config: Config, registry: Registry | None = None, now: datetime | None = None
+    config: Config,
+    registry: Registry | None = None,
+    now: datetime | None = None,
+    fetcher: Fetcher | None = None,
 ) -> SyncReport:
     report = SyncReport()
     now = now or _now()
@@ -48,6 +52,8 @@ def run_sync(
         registry.path = config.registry_path or DEFAULT_REGISTRY_PATH
 
     result = scan(config.papers_dir)
+    if fetcher is not None:
+        _autofill(result, fetcher, report)
     for inv in result.invalid:
         report.warnings.append(Warning_("invalid", f"{inv.path}: {inv.reason}", [inv.path]))
     res = resolve(result.papers, registry)
@@ -117,3 +123,26 @@ def run_sync(
                 )
             )
     return report
+
+
+def _autofill(result, fetcher: Fetcher, report: SyncReport) -> None:
+    """Fill empty frontmatter fields from the DOI/arXiv id, then re-read the note."""
+    for i, paper in enumerate(result.papers):
+        if not paper.needs_fetch:
+            continue
+        data = fetcher.fetch(paper)
+        if data is None:
+            report.warnings.append(
+                Warning_("fetch", f"{paper.path}: metadata lookup failed, will retry", [paper.path])
+            )
+            continue
+        try:
+            update_frontmatter(paper.path, missing_updates(paper, data))
+        except (OSError, ValueError) as e:
+            report.warnings.append(
+                Warning_("writeback", f"cannot update {paper.path}: {e}", [paper.path])
+            )
+            continue
+        reparsed = parse_note(paper.path)
+        if isinstance(reparsed, Paper):
+            result.papers[i] = reparsed
