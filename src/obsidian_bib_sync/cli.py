@@ -162,6 +162,32 @@ def _cmd_doctor(args) -> int:
     return 1 if problems else 0
 
 
+def _cmd_service(args) -> int:
+    from . import service as svc
+
+    s = svc.Service()
+    try:
+        if args.action == "install":
+            exe = s.install()
+            print(f"installed {s.plist_path}\nruns: {exe} run\nlog:  {s.log_path}")
+        elif args.action == "uninstall":
+            print("removed" if s.uninstall() else "was not installed")
+        elif args.action == "restart":
+            s.restart()
+            print("restarted")
+        elif args.action == "status":
+            print("loaded" if s.is_loaded() else "not loaded")
+            return 0 if s.is_loaded() else 1
+        elif args.action == "logs":
+            import os
+
+            os.execvp("tail", ["tail", "-n", "50", "-f", str(s.log_path)])
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_tui(args) -> int:
     from .tui.app import main as tui_main
 
@@ -201,6 +227,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("doctor", help="check configuration and environment")
     p.set_defaults(func=_cmd_doctor)
+
+    p = sub.add_parser("service", help="manage the background service (launchd agent)")
+    p.add_argument("action", choices=["install", "uninstall", "restart", "status", "logs"])
+    p.set_defaults(func=_cmd_service)
 
     p = sub.add_parser("tui", help="open the terminal UI")
     p.set_defaults(func=_cmd_tui)
