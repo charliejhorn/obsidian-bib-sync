@@ -89,6 +89,10 @@ def run_sync(
         if Path(rec["path"]) in retained and rec["path"] not in emitted_paths:
             entries[key] = rec["entry"]  # temporarily unusable note: keep last good entry
             continue
+        if rec.get("pinned"):
+            entries[key] = rec["entry"]
+            report.orphans.append(key)
+            continue
         since = rec.get("orphaned_since")
         if since is None:
             since = rec["orphaned_since"] = now.isoformat(timespec="seconds")

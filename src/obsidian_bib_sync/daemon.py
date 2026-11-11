@@ -11,8 +11,8 @@ from pathlib import Path
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from . import ipc
-from .citekey import DEFAULT_REGISTRY_PATH, Registry
+from . import ipc, rewrite
+from .citekey import DEFAULT_REGISTRY_PATH, Registry, accept_rename
 from .config import Config, config_path
 from .fetch import Fetcher
 from .sync import SyncReport, run_sync
@@ -78,6 +78,9 @@ class Daemon:
             ],
             "errors": report.errors,
             "orphans": report.orphans,
+            "aliases": {
+                k: r["renamed_to"] for k, r in self.registry.keys.items() if r.get("renamed_to")
+            },
         }
 
     def sync_now(self) -> dict:
@@ -135,7 +138,45 @@ class Daemon:
         if name == "reload":
             self.reload_config()
             return {"ok": True, "status": self.sync_now()}
+        if name == "keys":
+            with self._lock:
+                return {"ok": True, "keys": self.registry.keys}
+        if name in ("rename_preview", "rename_apply", "rename_drop"):
+            return self._rename(name, cmd.get("old", ""))
+        if name in ("orphan_remove", "orphan_keep"):
+            return self._orphan(name, cmd.get("key", ""))
         return {"ok": False, "error": f"unknown command: {name!r}"}
+
+    def _rename(self, name: str, old: str) -> dict:
+        with self._lock:
+            rec = self.registry.keys.get(old)
+            if not rec or not rec.get("renamed_to"):
+                return {"ok": False, "error": f"no pending rename for key {old!r}"}
+            new = rec["renamed_to"]
+            roots = sorted({t.parent for t in self.config.targets})
+            changes = rewrite.preview(roots, old, new)
+            files = [{"path": str(c.path), "count": c.count, "diff": c.diff()} for c in changes]
+            if name == "rename_preview":
+                return {"ok": True, "old": old, "new": new, "files": files}
+            if name == "rename_apply":
+                rewrite.apply(changes)
+            accept_rename(self.registry, old)
+            self.registry.save()
+            status = self.sync_now()
+            return {"ok": True, "old": old, "new": new, "files": files, "status": status}
+
+    def _orphan(self, name: str, key: str) -> dict:
+        with self._lock:
+            rec = self.registry.keys.get(key)
+            if not rec or rec.get("orphaned_since") is None:
+                return {"ok": False, "error": f"{key!r} is not an orphaned entry"}
+            if name == "orphan_keep":
+                rec["pinned"] = True
+            else:
+                rec.pop("pinned", None)
+                rec["orphaned_since"] = "1970-01-01T00:00:00+00:00"  # past grace: dropped now
+            self.registry.save()
+            return {"ok": True, "status": self.sync_now()}
 
     # -- main loop ---------------------------------------------------------
     def stop(self, *_) -> None:
