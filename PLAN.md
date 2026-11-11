@@ -7,8 +7,8 @@
 - [x] Plan approved
 - [x] M1 Scaffold (pyproject, uv, ruff, pytest, CI, CLAUDE.md)
 - [x] M2 notes (frontmatter parse, scan, round-trip write; "First Last" splits on last word, so use "Last, First" for particles like "van der Berg")
-- [ ] M3 citekey
-- [ ] M4 bibwriter/sync/CLI
+- [x] M3 citekey
+- [x] M4 bibwriter/sync/CLI (init, add, remove, list, sync; aliases are full duplicate entries; unusable notes keep last good entry; missing papers dir aborts sync)
 - [ ] M5 fetch
 - [ ] M6 daemon/IPC
 - [ ] M7 TUI/rewrite
